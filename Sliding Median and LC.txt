@@ -1,0 +1,140 @@
+# Sliding Median Technique and chi2 plot and Light-Curves
+
+import os
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+
+# Directory containing the folders with the files
+main_directory = r"C:\Users\91912\Desktop\p"
+
+# Directory where the plots will be saved
+plots_directory = r"C:\Users\91912\Desktop\p\Plots"
+if not os.path.exists(plots_directory):
+    os.makedirs(plots_directory)
+
+# Specify the column names
+column_names = ['TIME_KBJD', 'OBS_FLUX', 'OBS_FLUXerr', 'TIME_JD', 'NORM_FLUX', 'NORM_FLUXerr']
+
+def sliding_median(arr, window_size):
+    half_window = window_size // 2
+    medians = []
+    for i in range(len(arr)):
+        if i < half_window:
+            medians.append(np.median(arr[:i + half_window + 1]))
+        elif i >= len(arr) - half_window:
+            medians.append(np.median(arr[i - half_window:]))
+        else:
+            medians.append(np.median(arr[i - half_window:i + half_window + 1]))
+    return medians
+
+# Loop over all subdirectories in the main directory
+for root, dirs, files in os.walk(main_directory):
+    for file in files:
+        # Check if the file ends with '_allLCs.txt'
+        if file.endswith("_allLCs.txt"):
+            file_path = os.path.join(root, file)
+            df_2 = pd.read_csv(file_path, sep="\s+", skiprows=10, names=column_names, engine='python')
+
+            # Clean the data
+            df_2.dropna(inplace=True)
+            df_2["Reduced_JD"] = pd.to_numeric(df_2["TIME_KBJD"], errors="coerce")
+            df_2.dropna(subset=["Reduced_JD"], inplace=True)
+
+            # Replacing fluxes below sigma/5 by the median of their surrounding points
+            sigma = np.std(df_2["OBS_FLUX"])
+            sigma_threshold = sigma / 5
+
+            for i in range(len(df_2)):
+                if np.abs(df_2["OBS_FLUX"].iloc[i] - df_2["OBS_FLUX"].iloc[i]) > sigma_threshold:
+                    aux = np.arange(i-10, i+11)
+                    aux = aux[(aux >= 0) & (aux < len(df_2))]  # Exclude indices outside the valid range
+                    df_2.loc[i, "OBS_FLUX"] = np.median(df_2["OBS_FLUX"].iloc[aux])
+
+            # Normalizing by sliding median technique
+            window_size = len(df_2) // 4
+            df_2["Normalized_FLUX"] = df_2["OBS_FLUX"] / sliding_median(df_2["OBS_FLUX"], window_size)
+
+            # Define box sizes and compute chi-square values
+            box_sizes = np.arange(10, 101, 1)
+            chi2_values = np.zeros_like(box_sizes, dtype=float)
+
+            for i, bz in enumerate(box_sizes):
+                flux_aux = np.zeros_like(df_2["Normalized_FLUX"])
+                for j, flux in enumerate(df_2["Normalized_FLUX"]):
+                    if j < bz + 1:
+                        flux_aux[j] = np.median(df_2["Normalized_FLUX"][:j + bz])
+                    elif j > len(df_2["Normalized_FLUX"]) - 1 - (bz + 1):
+                        flux_aux[j] = np.median(df_2["Normalized_FLUX"][j - bz:])
+                    else:
+                        flux_aux[j] = np.median(df_2["Normalized_FLUX"][j - bz:j + bz + 1])
+                chi2_values[i] = np.sum(((df_2["Normalized_FLUX"] - flux_aux) ** 2) / df_2["OBS_FLUXerr"] ** 2)
+
+            # Find the maximum chi-square value and its corresponding box size
+            max_chi2 = np.max(chi2_values)
+            max_chi2_box_size = box_sizes[np.argmax(chi2_values)]
+
+            # Plot the chi-square versus box size
+            plt.figure(figsize=(8, 4))
+            plt.scatter(box_sizes, chi2_values, marker='+', color='green')
+            plt.xlabel("Box Size (Number of Points)")
+            plt.ylabel("Chi-Square")
+            plt.title("Chi-Square versus Box Size for {}".format(file))
+            plt.grid(True)
+            plt.savefig(os.path.join(plots_directory, file.replace("_allLCs.txt", "_chi2_plot.png")))
+            plt.close()
+
+            # Using the maximum chi-square value, create the phase-folded light curve plot
+            Pe = 0  # Set default values in case the '_res.txt' file is not found
+            T0 = 0
+            for res_file in files:
+                # Check if the file ends with '_res.txt'
+                if res_file.endswith("_res.txt"):
+                    file_path = os.path.join(root, res_file)
+
+                    # Read the 7th line from the file
+                    df_res = pd.read_csv(file_path, skiprows=7, nrows=1, header=None, engine='python')
+
+                    # Split the string into parts
+                    parts = df_res.iloc[0, 0].split()
+
+                    # Check the number of parts
+                    if len(parts) == 2:
+                        # Extract the two parts and convert them to floats
+                        Pe = float(parts[0])
+                        T0 = float(parts[1])
+                        break
+
+            tvar = df_2["TIME_JD"] - T0 + Pe / 4.
+            phase = (tvar / Pe) - np.floor(tvar / Pe)
+
+            plt.figure(figsize=(8, 4))
+            plt.plot(phase.values, df_2["Normalized_FLUX"].values, 'o', markersize=1)
+            plt.xlabel("Phase")
+            plt.ylabel("Normalized Flux")
+            plt.title("Phase-folded Light Curve")
+            plt.grid(True)
+            plt.savefig(os.path.join(plots_directory, file.replace("_allLCs.txt", "_phase_folded_plot.png")))
+            plt.close()
+
+            # Phase-folded light curve at phases 0.25 and 0.75
+            phase_025 = (tvar / Pe - 0.25) % 1.0
+            phase_075 = (tvar / Pe - 0.75) % 1.0
+
+            plt.figure(figsize=(8, 4))
+            plt.plot(phase_025.values, df_2["Normalized_FLUX"].values, 'o', markersize=1)
+            plt.xlabel("Phase (0.25)")
+            plt.ylabel("Normalized Flux")
+            plt.title("Phase-folded Light Curve (Phase 0.25)")
+            plt.grid(True)
+            plt.savefig(os.path.join(plots_directory, file.replace("_allLCs.txt", "_phase_folded_025.png")))
+            plt.close()
+
+            plt.figure(figsize=(8, 4))
+            plt.plot(phase_075.values, df_2["Normalized_FLUX"].values, 'o', markersize=1)
+            plt.xlabel("Phase (0.75)")
+            plt.ylabel("Normalized Flux")
+            plt.title("Phase-folded Light Curve (Phase 0.75)")
+            plt.grid(True)
+            plt.savefig(os.path.join(plots_directory, file.replace("_allLCs.txt", "_phase_folded_075.png")))
+            plt.close()
