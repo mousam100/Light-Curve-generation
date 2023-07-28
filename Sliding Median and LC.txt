@@ -5,15 +5,15 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 
-# Directory containing the folders with the files
+# Path
 main_directory = r"C:\Users\91912\Desktop\p"
 
-# Directory where the plots will be saved
+# Paths where plots will be saved
 plots_directory = r"C:\Users\91912\Desktop\p\Plots"
 if not os.path.exists(plots_directory):
     os.makedirs(plots_directory)
 
-# Specify the column names
+# Column names in Kepler's Data
 column_names = ['TIME_KBJD', 'OBS_FLUX', 'OBS_FLUXerr', 'TIME_JD', 'NORM_FLUX', 'NORM_FLUXerr']
 
 def sliding_median(arr, window_size):
@@ -36,7 +36,7 @@ for root, dirs, files in os.walk(main_directory):
             file_path = os.path.join(root, file)
             df_2 = pd.read_csv(file_path, sep="\s+", skiprows=10, names=column_names, engine='python')
 
-            # Clean the data
+            # Data cleaning
             df_2.dropna(inplace=True)
             df_2["Reduced_JD"] = pd.to_numeric(df_2["TIME_KBJD"], errors="coerce")
             df_2.dropna(subset=["Reduced_JD"], inplace=True)
@@ -55,7 +55,7 @@ for root, dirs, files in os.walk(main_directory):
             window_size = len(df_2) // 4
             df_2["Normalized_FLUX"] = df_2["OBS_FLUX"] / sliding_median(df_2["OBS_FLUX"], window_size)
 
-            # Define box sizes and compute chi-square values
+            # Define box sizes and chi-square value calculation
             box_sizes = np.arange(10, 101, 1)
             chi2_values = np.zeros_like(box_sizes, dtype=float)
 
@@ -70,11 +70,11 @@ for root, dirs, files in os.walk(main_directory):
                         flux_aux[j] = np.median(df_2["Normalized_FLUX"][j - bz:j + bz + 1])
                 chi2_values[i] = np.sum(((df_2["Normalized_FLUX"] - flux_aux) ** 2) / df_2["OBS_FLUXerr"] ** 2)
 
-            # Find the maximum chi-square value and its corresponding box size
+            # Maximum chi-square value and its corresponding box size
             max_chi2 = np.max(chi2_values)
             max_chi2_box_size = box_sizes[np.argmax(chi2_values)]
 
-            # Plot the chi-square versus box size
+            # chi-square versus box size plot
             plt.figure(figsize=(8, 4))
             plt.scatter(box_sizes, chi2_values, marker='+', color='green')
             plt.xlabel("Box Size (Number of Points)")
@@ -92,13 +92,12 @@ for root, dirs, files in os.walk(main_directory):
                 if res_file.endswith("_res.txt"):
                     file_path = os.path.join(root, res_file)
 
-                    # Read the 7th line from the file
+                    # Data reading for Period and T0 value
                     df_res = pd.read_csv(file_path, skiprows=7, nrows=1, header=None, engine='python')
 
                     # Split the string into parts
                     parts = df_res.iloc[0, 0].split()
 
-                    # Check the number of parts
                     if len(parts) == 2:
                         # Extract the two parts and convert them to floats
                         Pe = float(parts[0])
